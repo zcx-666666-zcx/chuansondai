@@ -1,8 +1,9 @@
 import time
+
 import cv2
-import torch
-import serial
 import numpy as np
+import serial
+import torch
 
 MODEL_PATH = "best.pt"
 CAMERA_INDEX = 0
@@ -22,31 +23,31 @@ SHOW_WINDOW = True
 # ========== 修复1：重新校准HSV颜色阈值（适配你的灯光） ==========
 # 精准区分四色，彻底解决颜色认错
 COLOR_HSV = {
-    "red_block":    [(0, 100, 80), (10, 255, 255), (170, 100, 80), (180, 255, 255)],
-    "yellow_block": [(15,  80, 100), (35, 255, 255)],
-    "green_block":  [(40,  70,  70), (80, 255, 255)],
-    "blue_block":   [(90,  80,  80), (130,255,255)]
+    "red_block": [(0, 100, 80), (10, 255, 255), (170, 100, 80), (180, 255, 255)],
+    "yellow_block": [(15, 80, 100), (35, 255, 255)],
+    "green_block": [(40, 70, 70), (80, 255, 255)],
+    "blue_block": [(90, 80, 80), (130, 255, 255)],
 }
 
 
 def open_serial(port, baudrate):
     try:
-        ser = serial.Serial(port, baudrate, timeout=0.1)
+        set = serial.Serial(port, baudrate, timeout=0.1)
         time.sleep(2)
         print(f"[INFO] 串口已打开: {port} @ {baudrate}")
-        return ser
+        return set
     except Exception as e:
         print(f"[ERROR] 串口打开失败: {e}")
         return None
 
 
-def send_command(ser, final_color):
-    if ser is None:
+def send_command(set, final_color):
+    if set is None:
         print("[WARN] 串口未连接")
         return
     # 红色方块触发，发送R给STM32
     if final_color == "red_block":
-        ser.write(b"R")
+        set.write(b"R")
         print("[TX 发送指令] R → STM32 准备推料")
 
 
@@ -106,19 +107,19 @@ def display_name(color_name):
         "yellow_block": "YELLOW",
         "green_block": "GREEN",
         "blue_block": "BLUE",
-        None: "UNKNOWN"
+        None: "UNKNOWN",
     }
     return mapping.get(color_name, "UNKNOWN")
 
 
 def main():
     print("[INFO] 正在加载模型...")
-    model = torch.hub.load('.', 'custom', path=MODEL_PATH, source='local')
+    model = torch.hub.load(".", "custom", path=MODEL_PATH, source="local")
     model.conf = CONF_THRES
     model.iou = 0.45
     print("[INFO] 模型加载完成")
 
-    ser = open_serial(SERIAL_PORT, BAUDRATE)
+    set = open_serial(SERIAL_PORT, BAUDRATE)
 
     cap = cv2.VideoCapture(CAMERA_INDEX)
     if not cap.isOpened():
@@ -151,49 +152,48 @@ def main():
 
             cx = (x1 + x2) // 2
             roi, (rx1, ry1, rx2, ry2) = get_center_roi(frame, x1, y1, x2, y2)
-            final_color, scores = classify_final_color(roi)
+            final_color, _scores = classify_final_color(roi)
 
             # 画检测框+中心点
             cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 180, 255), 2)
-            cv2.circle(frame, (cx, (y1+y2)//2), 5, (0,0,255), -1)
-            cv2.rectangle(frame, (rx1, ry1), (rx2, ry2), (255,255,0),1)
+            cv2.circle(frame, (cx, (y1 + y2) // 2), 5, (0, 0, 255), -1)
+            cv2.rectangle(frame, (rx1, ry1), (rx2, ry2), (255, 255, 0), 1)
 
             # 显示正确颜色名称
             label = f"{display_name(final_color)} {conf:.2f}"
-            cv2.putText(frame, label, (x1, max(25,y1-10)),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0,255,0),2)
+            cv2.putText(frame, label, (x1, max(25, y1 - 10)), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
 
             # 只追踪目标红色方块
             if final_color == TARGET_COLOR:
                 score = conf
                 if score > best_score:
                     best_score = score
-                    best_target = {"final_color":final_color, "cx":cx}
+                    best_target = {"final_color": final_color, "cx": cx}
 
         # 画触发竖线
-        cv2.line(frame, (trigger_x,0), (trigger_x,h), (255,0,0),2)
-        cv2.putText(frame,f"TARGET: RED",(20,30),cv2.FONT_HERSHEY_SIMPLEX,0.8,(255,255,0),2)
+        cv2.line(frame, (trigger_x, 0), (trigger_x, h), (255, 0, 0), 2)
+        cv2.putText(frame, "TARGET: RED", (20, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 0), 2)
 
         # 越过竖线，防抖发送指令
         if best_target:
             cx = best_target["cx"]
-            cv2.putText(frame,"DETECT RED",(20,90),cv2.FONT_HERSHEY_SIMPLEX,0.8,(0,255,255),2)
+            cv2.putText(frame, "DETECT RED", (20, 90), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 255), 2)
             now = time.time()
-            if cx >= trigger_x and (now-last_send_time)>=SEND_COOLDOWN:
-                send_command(ser, "red_block")
+            if cx >= trigger_x and (now - last_send_time) >= SEND_COOLDOWN:
+                send_command(set, "red_block")
                 last_send_time = now
-                cv2.putText(frame,"✅ PUSH NOW",(20,120),cv2.FONT_HERSHEY_SIMPLEX,0.8,(0,0,255),2)
+                cv2.putText(frame, "✅ PUSH NOW", (20, 120), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
         else:
-            cv2.putText(frame,"FINAL: NONE",(20,90),cv2.FONT_HERSHEY_SIMPLEX,0.8,(0,255,255),2)
+            cv2.putText(frame, "FINAL: NONE", (20, 90), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 255), 2)
 
         cv2.imshow("Color Sorting System", frame)
-        if cv2.waitKey(1) & 0xFF == ord('q'):
+        if cv2.waitKey(1) & 0xFF == ord("q"):
             break
 
     cap.release()
     cv2.destroyAllWindows()
-    if ser and ser.is_open:
-        ser.close()
+    if set and set.is_open:
+        set.close()
     print("[INFO] 程序已退出")
 
 
