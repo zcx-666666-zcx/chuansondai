@@ -1,8 +1,9 @@
 import time
+
 import cv2
-import torch
-import serial
 import numpy as np
+import serial
+import torch
 
 MODEL_PATH = "best.pt"
 CAMERA_INDEX = 0
@@ -22,22 +23,22 @@ SHOW_WINDOW = True
 
 def open_serial(port, baudrate):
     try:
-        ser = serial.Serial(port, baudrate, timeout=0.05)
+        set = serial.Serial(port, baudrate, timeout=0.05)
         time.sleep(2)
 
         # 清掉STM32上电时可能残留的启动信息
-        ser.reset_input_buffer()
-        ser.reset_output_buffer()
+        set.reset_input_buffer()
+        set.reset_output_buffer()
 
         print(f"[INFO] 串口已打开: {port} @ {baudrate}")
-        return ser
+        return set
     except Exception as e:
         print(f"[ERROR] 串口打开失败: {e}")
         return None
 
 
-def send_command(ser, final_color):
-    if ser is None:
+def send_command(set, final_color):
+    if set is None:
         print("[WARN] 串口未连接")
         return
 
@@ -47,10 +48,10 @@ def send_command(ser, final_color):
 
     try:
         # 每次发送前先清空输入缓冲，避免旧数据干扰
-        ser.reset_input_buffer()
+        set.reset_input_buffer()
 
-        ser.write(b"R")
-        ser.flush()
+        set.write(b"R")
+        set.flush()
         print("[TX] R")
     except Exception as e:
         print(f"[ERROR] 串口发送失败: {e}")
@@ -62,8 +63,8 @@ def send_command(ser, final_color):
     reply_buf = ""
 
     while time.time() - start < ack_timeout_s:
-        if ser.in_waiting > 0:
-            reply_buf += ser.read(ser.in_waiting).decode("utf-8", errors="ignore")
+        if set.in_waiting > 0:
+            reply_buf += set.read(set.in_waiting).decode("utf-8", errors="ignore")
 
             # 看到关键字就认为回复到了
             if "[OK] GET R" in reply_buf or "[RX BYTE]" in reply_buf:
@@ -110,11 +111,11 @@ def classify_final_color(roi_bgr):
     if np.count_nonzero(valid_mask) < 20:
         return None, {}
 
-    red1 = cv2.inRange(hsv, np.array([0, 70, 50]),   np.array([12, 255, 255]))
+    red1 = cv2.inRange(hsv, np.array([0, 70, 50]), np.array([12, 255, 255]))
     red2 = cv2.inRange(hsv, np.array([170, 70, 50]), np.array([179, 255, 255]))
     yellow = cv2.inRange(hsv, np.array([18, 70, 50]), np.array([38, 255, 255]))
-    green = cv2.inRange(hsv, np.array([40, 60, 40]),  np.array([95, 255, 255]))
-    blue = cv2.inRange(hsv, np.array([95, 60, 40]),   np.array([135, 255, 255]))
+    green = cv2.inRange(hsv, np.array([40, 60, 40]), np.array([95, 255, 255]))
+    blue = cv2.inRange(hsv, np.array([95, 60, 40]), np.array([135, 255, 255]))
 
     valid_u8 = valid_mask.astype(np.uint8) * 255
 
@@ -147,21 +148,21 @@ def display_name(color_name):
         "yellow_block": "YELLOW",
         "green_block": "GREEN",
         "blue_block": "BLUE",
-        None: "UNKNOWN"
+        None: "UNKNOWN",
     }
     return mapping.get(color_name, "UNKNOWN")
 
 
 def main():
     print("[INFO] 正在加载模型...")
-    model = torch.hub.load('.', 'custom', path=MODEL_PATH, source='local')
+    model = torch.hub.load(".", "custom", path=MODEL_PATH, source="local")
     model.conf = CONF_THRES
     model.iou = 0.45
     model.classes = None
     model.max_det = 100
     print("[INFO] 模型加载完成")
 
-    ser = open_serial(SERIAL_PORT, BAUDRATE)
+    set = open_serial(SERIAL_PORT, BAUDRATE)
 
     cap = cv2.VideoCapture(CAMERA_INDEX)
     if not cap.isOpened():
@@ -213,65 +214,56 @@ def main():
 
             # 保持原有显示逻辑
             label = f"{display_name(final_color)} {conf:.2f}"
-            cv2.putText(
-                frame,
-                label,
-                (x1, max(25, y1 - 10)),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.7,
-                (0, 255, 0),
-                2
-            )
+            cv2.putText(frame, label, (x1, max(25, y1 - 10)), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
 
             if final_color == TARGET_COLOR:
                 score = conf + area * 1e-7
                 if score > best_score:
                     best_score = score
-                    best_target = {
-                        "final_color": final_color,
-                        "conf": conf,
-                        "cx": cx,
-                        "cy": cy,
-                        "scores": scores
-                    }
+                    best_target = {"final_color": final_color, "conf": conf, "cx": cx, "cy": cy, "scores": scores}
 
         cv2.line(frame, (trigger_x, 0), (trigger_x, h), (255, 0, 0), 2)
-        cv2.putText(frame, f"TARGET: {display_name(TARGET_COLOR)}", (20, 30),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 0), 2)
-        cv2.putText(frame, f"TRIGGER_X: {trigger_x}", (20, 60),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 0), 2)
+        cv2.putText(
+            frame, f"TARGET: {display_name(TARGET_COLOR)}", (20, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 0), 2
+        )
+        cv2.putText(frame, f"TRIGGER_X: {trigger_x}", (20, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 0), 2)
 
         if best_target is not None:
             cx = best_target["cx"]
             conf = best_target["conf"]
             final_color = best_target["final_color"]
 
-            cv2.putText(frame, f"FINAL: {display_name(final_color)} {conf:.2f}", (20, 90),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 255), 2)
+            cv2.putText(
+                frame,
+                f"FINAL: {display_name(final_color)} {conf:.2f}",
+                (20, 90),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.8,
+                (0, 255, 255),
+                2,
+            )
 
             now = time.time()
             if cx >= trigger_x and (now - last_send_time) >= SEND_COOLDOWN:
-                send_command(ser, final_color)
+                send_command(set, final_color)
                 last_send_time = now
 
-                cv2.putText(frame, "ACTION: PUSH", (20, 120),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
+                cv2.putText(frame, "ACTION: PUSH", (20, 120), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
         else:
-            cv2.putText(frame, "FINAL: NONE", (20, 90),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 255), 2)
+            cv2.putText(frame, "FINAL: NONE", (20, 90), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 255), 2)
 
         if SHOW_WINDOW:
             cv2.imshow("Color Sorting System", frame)
 
         key = cv2.waitKey(1) & 0xFF
-        if key == ord('q'):
+        if key == ord("q"):
             break
 
     cap.release()
     cv2.destroyAllWindows()
 
-    if ser is not None and ser.is_open:
-        ser.close()
+    if set is not None and set.is_open:
+        set.close()
 
     print("[INFO] 程序退出")
 
