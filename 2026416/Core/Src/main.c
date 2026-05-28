@@ -18,6 +18,7 @@
 #define SERVO_HOME_ANGLE  90
 #define SERVO_PUSH_ANGLE  150
 #define SERVO_HOLD_MS     500
+#define SERVO_POWER_TEST_MS 2000
 /* USER CODE END PD */
 
 void SystemClock_Config(void);
@@ -64,7 +65,11 @@ int main(void)
   HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_4);
 
   Servo_SetAngle(SERVO_HOME_ANGLE);
-  HAL_Delay(1000);
+  HAL_Delay(500);
+  Servo_SetAngle(SERVO_PUSH_ANGLE);
+  HAL_Delay(SERVO_POWER_TEST_MS);
+  Servo_SetAngle(SERVO_HOME_ANGLE);
+  HAL_Delay(500);
   /* USER CODE END 2 */
 
   while (1)
