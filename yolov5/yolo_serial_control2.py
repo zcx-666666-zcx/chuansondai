@@ -39,42 +39,20 @@ def open_serial(port, baudrate):
 def send_command(ser, final_color):
     if ser is None:
         print("[WARN] 串口未连接")
-        return
+        return False
 
     # 保持原功能：只有红色才发送R
     if final_color != "red_block":
-        return
+        return False
 
     try:
-        # 每次发送前先清空输入缓冲，避免旧数据干扰
-        ser.reset_input_buffer()
-
         ser.write(b"R")
         ser.flush()
         print("[TX] R")
+        return True
     except Exception as e:
         print(f"[ERROR] 串口发送失败: {e}")
-        return
-
-    # 等待STM32回复
-    ack_timeout_s = 1.0
-    start = time.time()
-    reply_buf = ""
-
-    while time.time() - start < ack_timeout_s:
-        if ser.in_waiting > 0:
-            reply_buf += ser.read(ser.in_waiting).decode("utf-8", errors="ignore")
-
-            # 看到关键字就认为回复到了
-            if "[OK] GET R" in reply_buf or "[RX BYTE]" in reply_buf:
-                break
-
-        time.sleep(0.01)
-
-    if reply_buf.strip():
-        print("[RX]", reply_buf.strip())
-    else:
-        print("[RX] 未收到STM32回复")
+        return False
 
 
 def get_center_roi(frame, x1, y1, x2, y2, shrink=0.45):
@@ -251,8 +229,8 @@ def main():
 
             now = time.time()
             if cx >= trigger_x and (now - last_send_time) >= SEND_COOLDOWN:
-                send_command(ser, final_color)
-                last_send_time = now
+                if send_command(ser, final_color):
+                    last_send_time = now
 
                 cv2.putText(frame, "ACTION: PUSH", (20, 120),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)

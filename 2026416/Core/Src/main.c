@@ -24,7 +24,7 @@
 typedef enum
 {
     SERVO_IDLE = 0,
-    SERVO_ACTIVE
+    SERVO_HOLD
 } ServoState_t;
 /* USER CODE END PTD */
 
@@ -34,8 +34,9 @@ typedef enum
 // 舵机参数（TIM2_CH4）
 #define SERVO_MIN_US        1000
 #define SERVO_MAX_US        2000
-#define SERVO_HOME_ANGLE    90
-#define SERVO_ROTATE_ANGLE  (SERVO_HOME_ANGLE + 60)
+#define SERVO_MID_ANGLE         90
+#define SERVO_PUSH_ANGLE        150
+#define SERVO_RESET_TIMEOUT_MS  300
 
 // 步进参数
 #define STEPPER_HALF_PERIOD_MS      2
@@ -56,15 +57,14 @@ typedef enum
 /* Private variables ---------------------------------------------------------*/
 /* USER CODE BEGIN PV */
 volatile uint8_t uart_rx_byte = 0;
-volatile uint8_t cmd_servo_detect_flag = 0;
-volatile uint8_t cmd_servo_reset_flag = 0;
+volatile uint8_t cmd_servo_push_flag = 0;
 volatile uint8_t uart_ack_flag = 0;
 
 volatile uint8_t uart_rx_seen_flag = 0;
 volatile uint8_t uart_last_byte = 0;
 
 ServoState_t servo_state = SERVO_IDLE;
-uint32_t servo_state_tick = 0;
+uint32_t servo_last_detect_tick = 0;
 
 uint8_t stepper_pul_state = 0;
 uint32_t stepper_last_toggle_ms = 0;
@@ -78,8 +78,8 @@ void Uart_SendString(char *str);
 
 void Servo_WriteUs(uint16_t us);
 void Servo_SetAngle(uint8_t angle);
-void Servo_MoveToHome(void);
-void Servo_MoveToDetect(void);
+void Servo_StartPushSequence(void);
+void Servo_Service(void);
 
 void Stepper_Enable(void);
 void Stepper_Disable(void);
@@ -116,16 +116,35 @@ void Servo_SetAngle(uint8_t angle)
     Servo_WriteUs(us);
 }
 
-void Servo_MoveToHome(void)
+void Servo_StartPushSequence(void)
 {
-    Servo_SetAngle(SERVO_HOME_ANGLE);
-    servo_state = SERVO_IDLE;
+    Servo_SetAngle(SERVO_PUSH_ANGLE);
+    servo_state = SERVO_HOLD;
+    servo_last_detect_tick = HAL_GetTick();
 }
 
-void Servo_MoveToDetect(void)
+void Servo_Service(void)
 {
-    Servo_SetAngle(SERVO_ROTATE_ANGLE);
-    servo_state = SERVO_ACTIVE;
+    uint32_t now = HAL_GetTick();
+
+    switch (servo_state)
+    {
+        case SERVO_IDLE:
+            break;
+
+        case SERVO_HOLD:
+            if (now - servo_last_detect_tick >= SERVO_RESET_TIMEOUT_MS)
+            {
+                Servo_SetAngle(SERVO_MID_ANGLE);
+                servo_state = SERVO_IDLE;
+            }
+            break;
+
+        default:
+            Servo_SetAngle(SERVO_MID_ANGLE);
+            servo_state = SERVO_IDLE;
+            break;
+    }
 }
 
 /* =========================
@@ -234,7 +253,7 @@ int main(void)
   // 启动舵机PWM
   HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_4);
   HAL_Delay(500);
-  Servo_MoveToHome();
+  Servo_SetAngle(SERVO_MID_ANGLE);
   HAL_Delay(300);
 
   // 步进电机初始化
@@ -249,14 +268,15 @@ int main(void)
 
   Uart_SendString("System Ready\r\n");
   Uart_SendString("Stepper Running...\r\n");
-  Uart_SendString("Send 'R' to rotate servo\r\n");
-  Uart_SendString("Send 'S' to reset servo\r\n");
+  Uart_SendString("Send 'R' to push servo\r\n");
 
   /* USER CODE END 2 */
 
   while (1)
   {
     Stepper_Service();
+    Servo_Service();
+
     // 打印收到的原始字节
     if (uart_rx_seen_flag)
     {
@@ -275,16 +295,10 @@ int main(void)
         Uart_SendString(msg);
     }
 
-    if (cmd_servo_detect_flag)
+    if (cmd_servo_push_flag)
     {
-        cmd_servo_detect_flag = 0;
-        Servo_MoveToDetect();
-    }
-
-    if (cmd_servo_reset_flag)
-    {
-        cmd_servo_reset_flag = 0;
-        Servo_MoveToHome();
+        cmd_servo_push_flag = 0;
+        Servo_StartPushSequence();
     }
 
     // 收到R后的ACK
@@ -340,12 +354,7 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 
         if (uart_rx_byte == 'R')
         {
-            cmd_servo_detect_flag = 1;
-            uart_ack_flag = 1;
-        }
-        else if (uart_rx_byte == 'S')
-        {
-            cmd_servo_reset_flag = 1;
+            cmd_servo_push_flag = 1;
             uart_ack_flag = 1;
         }
 
