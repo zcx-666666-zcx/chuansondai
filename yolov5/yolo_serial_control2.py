@@ -16,7 +16,7 @@ IMG_SIZE = 640
 TARGET_COLOR = "red_block"
 
 TRIGGER_X_RATIO = 0.70
-SEND_COOLDOWN = 1.2
+SEND_INTERVAL = 0.05
 SHOW_WINDOW = True
 
 
@@ -220,7 +220,6 @@ def main():
                     cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 0), 2)
 
         if best_target is not None:
-            cx = best_target["cx"]
             conf = best_target["conf"]
             final_color = best_target["final_color"]
 
@@ -228,7 +227,7 @@ def main():
                         cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 255), 2)
 
             now = time.time()
-            if cx >= trigger_x and (now - last_send_time) >= SEND_COOLDOWN:
+            if (now - last_send_time) >= SEND_INTERVAL:
                 if send_command(ser, final_color):
                     last_send_time = now
 

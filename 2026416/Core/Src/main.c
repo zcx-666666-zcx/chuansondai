@@ -24,7 +24,8 @@
 typedef enum
 {
     SERVO_IDLE = 0,
-    SERVO_HOLD
+    SERVO_PUSH_HOLD,
+    SERVO_RETURN_HOLD
 } ServoState_t;
 /* USER CODE END PTD */
 
@@ -34,9 +35,9 @@ typedef enum
 // 舵机参数（TIM2_CH4）
 #define SERVO_MIN_US        1000
 #define SERVO_MAX_US        2000
-#define SERVO_MID_ANGLE         90
-#define SERVO_PUSH_ANGLE        150
-#define SERVO_RESET_TIMEOUT_MS  300
+#define SERVO_MID_ANGLE     90
+#define SERVO_PUSH_ANGLE    150
+#define SERVO_RESET_TIMEOUT_MS  500
 
 // 步进参数
 #define STEPPER_HALF_PERIOD_MS      2
@@ -64,7 +65,7 @@ volatile uint8_t uart_rx_seen_flag = 0;
 volatile uint8_t uart_last_byte = 0;
 
 ServoState_t servo_state = SERVO_IDLE;
-uint32_t servo_last_detect_tick = 0;
+uint32_t servo_state_tick = 0;
 
 uint8_t stepper_pul_state = 0;
 uint32_t stepper_last_toggle_ms = 0;
@@ -119,8 +120,9 @@ void Servo_SetAngle(uint8_t angle)
 void Servo_StartPushSequence(void)
 {
     Servo_SetAngle(SERVO_PUSH_ANGLE);
-    servo_state = SERVO_HOLD;
-    servo_last_detect_tick = HAL_GetTick();
+    servo_state = SERVO_PUSH_HOLD;
+    servo_state_tick = HAL_GetTick();
+    HAL_GPIO_TogglePin(GPIOC, GPIO_PIN_13);
 }
 
 void Servo_Service(void)
@@ -132,12 +134,17 @@ void Servo_Service(void)
         case SERVO_IDLE:
             break;
 
-        case SERVO_HOLD:
-            if (now - servo_last_detect_tick >= SERVO_RESET_TIMEOUT_MS)
+        case SERVO_PUSH_HOLD:
+            if (now - servo_state_tick >= SERVO_RESET_TIMEOUT_MS)
             {
                 Servo_SetAngle(SERVO_MID_ANGLE);
-                servo_state = SERVO_IDLE;
+                servo_state = SERVO_RETURN_HOLD;
+                servo_state_tick = now;
             }
+            break;
+
+        case SERVO_RETURN_HOLD:
+            servo_state = SERVO_IDLE;
             break;
 
         default:
@@ -253,6 +260,8 @@ int main(void)
   // 启动舵机PWM
   HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_4);
   HAL_Delay(500);
+  Servo_SetAngle(SERVO_PUSH_ANGLE);
+  HAL_Delay(300);
   Servo_SetAngle(SERVO_MID_ANGLE);
   HAL_Delay(300);
 
