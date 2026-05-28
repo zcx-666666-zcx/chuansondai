@@ -28,8 +28,8 @@ void Servo_SetAngle(uint8_t angle);
 /* USER CODE END PFP */
 
 /* USER CODE BEGIN PV */
-volatile uint8_t uart_rx_byte = 0;
-volatile uint8_t servo_active = 0;
+uint8_t uart_rx_byte = 0;
+uint8_t servo_active = 0;
 uint32_t servo_last_rx_tick = 0;
 /* USER CODE END PV */
 
@@ -65,11 +65,21 @@ int main(void)
 
   Servo_SetAngle(SERVO_HOME_ANGLE);
   HAL_Delay(1000);
-  HAL_UART_Receive_IT(&huart1, (uint8_t *)&uart_rx_byte, 1);
   /* USER CODE END 2 */
 
   while (1)
   {
+    if (HAL_UART_Receive(&huart1, &uart_rx_byte, 1, 1) == HAL_OK)
+    {
+        if (uart_rx_byte == 'R')
+        {
+            servo_active = 1;
+            servo_last_rx_tick = HAL_GetTick();
+            Servo_SetAngle(SERVO_PUSH_ANGLE);
+            HAL_UART_Transmit(&huart1, (uint8_t *)"OK\r\n", 4, 10);
+        }
+    }
+
     if (servo_active && (HAL_GetTick() - servo_last_rx_tick >= SERVO_HOLD_MS))
     {
         servo_active = 0;
@@ -117,20 +127,6 @@ void Error_Handler(void)
 }
 
 /* USER CODE BEGIN 4 */
-void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
-{
-    if (huart->Instance == USART1)
-    {
-        if (uart_rx_byte == 'R')
-        {
-            servo_active = 1;
-            servo_last_rx_tick = HAL_GetTick();
-            Servo_SetAngle(SERVO_PUSH_ANGLE);
-        }
-
-        HAL_UART_Receive_IT(&huart1, (uint8_t *)&uart_rx_byte, 1);
-    }
-}
 /* USER CODE END 4 */
 
 #ifdef USE_FULL_ASSERT
