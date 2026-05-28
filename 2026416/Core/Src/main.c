@@ -37,7 +37,8 @@ typedef enum
 #define SERVO_MAX_US        2000
 #define SERVO_MID_ANGLE     90
 #define SERVO_PUSH_ANGLE    150
-#define SERVO_RESET_TIMEOUT_MS  500
+#define SERVO_PUSH_TIME_MS  500
+#define SERVO_BACK_TIME_MS  250
 
 // 步进参数
 #define STEPPER_HALF_PERIOD_MS      2
@@ -122,7 +123,6 @@ void Servo_StartPushSequence(void)
     Servo_SetAngle(SERVO_PUSH_ANGLE);
     servo_state = SERVO_PUSH_HOLD;
     servo_state_tick = HAL_GetTick();
-    HAL_GPIO_TogglePin(GPIOC, GPIO_PIN_13);
 }
 
 void Servo_Service(void)
@@ -135,7 +135,7 @@ void Servo_Service(void)
             break;
 
         case SERVO_PUSH_HOLD:
-            if (now - servo_state_tick >= SERVO_RESET_TIMEOUT_MS)
+            if (now - servo_state_tick >= SERVO_PUSH_TIME_MS)
             {
                 Servo_SetAngle(SERVO_MID_ANGLE);
                 servo_state = SERVO_RETURN_HOLD;
@@ -144,11 +144,13 @@ void Servo_Service(void)
             break;
 
         case SERVO_RETURN_HOLD:
-            servo_state = SERVO_IDLE;
+            if (now - servo_state_tick >= SERVO_BACK_TIME_MS)
+            {
+                servo_state = SERVO_IDLE;
+            }
             break;
 
         default:
-            Servo_SetAngle(SERVO_MID_ANGLE);
             servo_state = SERVO_IDLE;
             break;
     }
@@ -260,8 +262,6 @@ int main(void)
   // 启动舵机PWM
   HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_4);
   HAL_Delay(500);
-  Servo_SetAngle(SERVO_PUSH_ANGLE);
-  HAL_Delay(300);
   Servo_SetAngle(SERVO_MID_ANGLE);
   HAL_Delay(300);
 
@@ -304,6 +304,7 @@ int main(void)
         Uart_SendString(msg);
     }
 
+    // 收到R后，舵机动作
     if (cmd_servo_push_flag)
     {
         cmd_servo_push_flag = 0;

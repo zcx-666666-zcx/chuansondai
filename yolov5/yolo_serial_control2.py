@@ -16,7 +16,7 @@ IMG_SIZE = 640
 TARGET_COLOR = "red_block"
 
 TRIGGER_X_RATIO = 0.70
-SEND_INTERVAL = 0.05
+SEND_COOLDOWN = 0.05
 SHOW_WINDOW = True
 
 
@@ -227,7 +227,7 @@ def main():
                         cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 255), 2)
 
             now = time.time()
-            if (now - last_send_time) >= SEND_INTERVAL:
+            if (now - last_send_time) >= SEND_COOLDOWN:
                 if send_command(ser, final_color):
                     last_send_time = now
 
