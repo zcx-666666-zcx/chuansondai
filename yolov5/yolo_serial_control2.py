@@ -15,6 +15,8 @@ IMG_SIZE = 640
 # 当前先测试红色推出
 TARGET_COLOR = "red_block"
 
+TRIGGER_X_RATIO = 0.70
+SEND_COOLDOWN = 1.2
 SHOW_WINDOW = True
 
 
@@ -34,19 +36,22 @@ def open_serial(port, baudrate):
         return None
 
 
-def send_command(ser, command):
+def send_command(ser, final_color):
     if ser is None:
         print("[WARN] 串口未连接")
         return
 
-    if command not in {"R", "S"}:
+    # 保持原功能：只有红色才发送R
+    if final_color != "red_block":
         return
 
     try:
+        # 每次发送前先清空输入缓冲，避免旧数据干扰
         ser.reset_input_buffer()
-        ser.write(command.encode("utf-8"))
+
+        ser.write(b"R")
         ser.flush()
-        print(f"[TX] {command}")
+        print("[TX] R")
     except Exception as e:
         print(f"[ERROR] 串口发送失败: {e}")
         return
@@ -166,7 +171,7 @@ def main():
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
 
-    target_present = False
+    last_send_time = 0
 
     print("[INFO] 按 q 退出")
 
@@ -175,6 +180,9 @@ def main():
         if not ret:
             print("[WARN] 摄像头读取失败")
             continue
+
+        h, w = frame.shape[:2]
+        trigger_x = int(w * TRIGGER_X_RATIO)
 
         results = model(frame, size=IMG_SIZE)
         df = results.pandas().xyxy[0]
@@ -227,31 +235,30 @@ def main():
                         "scores": scores
                     }
 
+        cv2.line(frame, (trigger_x, 0), (trigger_x, h), (255, 0, 0), 2)
         cv2.putText(frame, f"TARGET: {display_name(TARGET_COLOR)}", (20, 30),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 0), 2)
+        cv2.putText(frame, f"TRIGGER_X: {trigger_x}", (20, 60),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 0), 2)
 
         if best_target is not None:
+            cx = best_target["cx"]
             conf = best_target["conf"]
             final_color = best_target["final_color"]
 
-            cv2.putText(frame, f"FINAL: {display_name(final_color)} {conf:.2f}", (20, 60),
+            cv2.putText(frame, f"FINAL: {display_name(final_color)} {conf:.2f}", (20, 90),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 255), 2)
 
-            if not target_present:
-                send_command(ser, "R")
-                target_present = True
+            now = time.time()
+            if cx >= trigger_x and (now - last_send_time) >= SEND_COOLDOWN:
+                send_command(ser, final_color)
+                last_send_time = now
 
-            cv2.putText(frame, "ACTION: ROTATE", (20, 90),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
+                cv2.putText(frame, "ACTION: PUSH", (20, 120),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
         else:
-            if target_present:
-                send_command(ser, "S")
-                target_present = False
-
-            cv2.putText(frame, "FINAL: NONE", (20, 60),
+            cv2.putText(frame, "FINAL: NONE", (20, 90),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 255), 2)
-            cv2.putText(frame, "ACTION: RESET", (20, 90),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
 
         if SHOW_WINDOW:
             cv2.imshow("Color Sorting System", frame)
