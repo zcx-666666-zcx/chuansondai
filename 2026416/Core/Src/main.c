@@ -16,9 +16,8 @@
 #define SERVO_MIN_US      1000
 #define SERVO_MAX_US      2000
 #define SERVO_HOME_ANGLE  90
-#define SERVO_PUSH_ANGLE  150
-#define SERVO_HOLD_MS     500
-#define SERVO_POWER_TEST_MS 2000
+#define SERVO_ACTIVE_ANGLE 60
+#define SERVO_SIGNAL_TIMEOUT_MS 150
 /* USER CODE END PD */
 
 void SystemClock_Config(void);
@@ -65,11 +64,9 @@ int main(void)
   HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_4);
 
   Servo_SetAngle(SERVO_HOME_ANGLE);
-  HAL_Delay(500);
-  Servo_SetAngle(SERVO_PUSH_ANGLE);
-  HAL_Delay(SERVO_POWER_TEST_MS);
-  Servo_SetAngle(SERVO_HOME_ANGLE);
-  HAL_Delay(500);
+  servo_active = 0;
+  servo_last_rx_tick = 0;
+  HAL_Delay(300);
   /* USER CODE END 2 */
 
   while (1)
@@ -80,12 +77,12 @@ int main(void)
         {
             servo_active = 1;
             servo_last_rx_tick = HAL_GetTick();
-            Servo_SetAngle(SERVO_PUSH_ANGLE);
+            Servo_SetAngle(SERVO_ACTIVE_ANGLE);
             HAL_UART_Transmit(&huart1, (uint8_t *)"OK\r\n", 4, 10);
         }
     }
 
-    if (servo_active && (HAL_GetTick() - servo_last_rx_tick >= SERVO_HOLD_MS))
+    if (servo_active && (HAL_GetTick() - servo_last_rx_tick >= SERVO_SIGNAL_TIMEOUT_MS))
     {
         servo_active = 0;
         Servo_SetAngle(SERVO_HOME_ANGLE);

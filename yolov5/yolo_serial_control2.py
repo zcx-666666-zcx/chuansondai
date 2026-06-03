@@ -3,6 +3,7 @@ import cv2
 import torch
 import serial
 import numpy as np
+from serial_heartbeat import should_send_heartbeat
 
 MODEL_PATH = "best.pt"
 CAMERA_INDEX = 0
@@ -12,11 +13,10 @@ BAUDRATE = 9600
 CONF_THRES = 0.35
 IMG_SIZE = 640
 
-# 当前先测试红色推出
+# 当前只对红色目标保持舵机工作位
 TARGET_COLOR = "red_block"
 
-TRIGGER_X_RATIO = 0.70
-SEND_COOLDOWN = 0.05
+SEND_INTERVAL = 0.05
 SHOW_WINDOW = True
 
 
@@ -41,7 +41,7 @@ def send_command(ser, final_color):
         print("[WARN] 串口未连接")
         return False
 
-    # 保持原功能：只有红色才发送R
+    # 保持原协议：只有红色目标时发送 R
     if final_color != "red_block":
         return False
 
@@ -160,8 +160,6 @@ def main():
             continue
 
         h, w = frame.shape[:2]
-        trigger_x = int(w * TRIGGER_X_RATIO)
-
         results = model(frame, size=IMG_SIZE)
         df = results.pandas().xyxy[0]
 
@@ -213,10 +211,9 @@ def main():
                         "scores": scores
                     }
 
-        cv2.line(frame, (trigger_x, 0), (trigger_x, h), (255, 0, 0), 2)
         cv2.putText(frame, f"TARGET: {display_name(TARGET_COLOR)}", (20, 30),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 0), 2)
-        cv2.putText(frame, f"TRIGGER_X: {trigger_x}", (20, 60),
+        cv2.putText(frame, "MODE: HEARTBEAT HOLD", (20, 60),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 0), 2)
 
         if best_target is not None:
@@ -227,15 +224,17 @@ def main():
                         cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 255), 2)
 
             now = time.time()
-            if (now - last_send_time) >= SEND_COOLDOWN:
+            if should_send_heartbeat(last_send_time, now, SEND_INTERVAL):
                 if send_command(ser, final_color):
                     last_send_time = now
 
-                cv2.putText(frame, "ACTION: PUSH", (20, 120),
+                cv2.putText(frame, "ACTION: HOLD 60 DEG", (20, 120),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
         else:
             cv2.putText(frame, "FINAL: NONE", (20, 90),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 255), 2)
+            cv2.putText(frame, "ACTION: WAIT HOME", (20, 120),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 180, 255), 2)
 
         if SHOW_WINDOW:
             cv2.imshow("Color Sorting System", frame)
