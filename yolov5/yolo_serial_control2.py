@@ -226,7 +226,7 @@ def main():
                 if send_command(ser, final_color):
                     last_send_time = now
 
-            cv2.putText(frame, "ACTION: HOLD 120 DEG", (20, 120),
+            cv2.putText(frame, "ACTION: HOLD 70 DEG", (20, 120),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
         else:
             cv2.putText(frame, "FINAL: NONE", (20, 90),
