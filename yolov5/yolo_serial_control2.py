@@ -3,8 +3,6 @@ import cv2
 import torch
 import serial
 import numpy as np
-from serial_heartbeat import should_send_heartbeat
-
 MODEL_PATH = "best.pt"
 CAMERA_INDEX = 0
 SERIAL_PORT = "/dev/cu.usbserial-14220"
@@ -13,10 +11,9 @@ BAUDRATE = 9600
 CONF_THRES = 0.35
 IMG_SIZE = 640
 
-# 当前只对红色目标保持舵机工作位
+# 红色目标出现沿：只发一次 R，由 STM32 完成 60度->复位
 TARGET_COLOR = "red_block"
-
-SEND_INTERVAL = 0.05
+TARGET_STABLE_FRAMES = 2
 SHOW_WINDOW = True
 
 
@@ -149,7 +146,8 @@ def main():
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
 
-    last_send_time = 0
+    trigger_armed = True
+    target_stable_frames = 0
 
     print("[INFO] 按 q 退出")
 
@@ -213,27 +211,33 @@ def main():
 
         cv2.putText(frame, f"TARGET: {display_name(TARGET_COLOR)}", (20, 30),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 0), 2)
-        cv2.putText(frame, "MODE: HEARTBEAT HOLD", (20, 60),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 0), 2)
+        cv2.putText(frame, "MODE: PULSE (R once -> 60 -> home)", (20, 60),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 0), 2)
 
         if best_target is not None:
+            target_stable_frames += 1
             conf = best_target["conf"]
             final_color = best_target["final_color"]
-
             cv2.putText(frame, f"FINAL: {display_name(final_color)} {conf:.2f}", (20, 90),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 255), 2)
-
-            now = time.time()
-            if should_send_heartbeat(last_send_time, now, SEND_INTERVAL):
-                if send_command(ser, final_color):
-                    last_send_time = now
-
-                cv2.putText(frame, "ACTION: HOLD 60 DEG", (20, 120),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
         else:
+            target_stable_frames = 0
+            trigger_armed = True
             cv2.putText(frame, "FINAL: NONE", (20, 90),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 255), 2)
-            cv2.putText(frame, "ACTION: WAIT HOME", (20, 120),
+
+        if (best_target is not None
+                and target_stable_frames >= TARGET_STABLE_FRAMES
+                and trigger_armed):
+            if send_command(ser, best_target["final_color"]):
+                trigger_armed = False
+            cv2.putText(frame, "ACTION: TX R (pulse)", (20, 120),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
+        elif best_target is not None:
+            cv2.putText(frame, "ACTION: WAIT RESET", (20, 120),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 180, 255), 2)
+        else:
+            cv2.putText(frame, "ACTION: ARMED", (20, 120),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 180, 255), 2)
 
         if SHOW_WINDOW:

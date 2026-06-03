@@ -78,8 +78,8 @@ Python 发送一种命令表示工作位，另一种命令表示回位。
 
 固件中定义：
 
-- `SERVO_HOME_ANGLE`
-- `SERVO_ACTIVE_ANGLE`，值设为 `60`
+- `SERVO_HOME_ANGLE`，绝对复位角，默认 `0`
+- `SERVO_ACTIVE_ANGLE`，绝对工作角，值设为 `60`
 - `SERVO_SIGNAL_TIMEOUT_MS`，取 `100` 到 `200` 毫秒之间，默认建议 `150` 毫秒
 
 ### 主循环行为
