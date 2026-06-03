@@ -1,7 +1,7 @@
 /* USER CODE BEGIN Header */
 /**
-  * MG90S: 上电复位 -> 收到R转到60度 -> 自动回复位
-  * 信号线接 PA3 (TIM2_CH4)
+  * MG90S/SG90 参考 CSDN 113447204：20ms PWM，0.5ms~2.5ms 对应 0~180度
+  * 信号线 -> PA3 (TIM2_CH4)
   */
 /* USER CODE END Header */
 
@@ -11,40 +11,39 @@
 #include "gpio.h"
 
 /* USER CODE BEGIN PD */
-#define SERVO_MIN_US           1000U
-#define SERVO_MAX_US           2000U
-#define SERVO_HOME_ANGLE       0U    /* 复位角(绝对0度)，顶死限位可改成5~15 */
-#define SERVO_ACTIVE_ANGLE     60U   /* 工作角(绝对60度) */
-#define SERVO_BOOT_SETTLE_MS   800U  /* 上电复位等待 */
-#define SERVO_ACTIVE_HOLD_MS   500U  /* 转到60度后保持多久再自动复位 */
+/* 与文章一致：0.5ms=0度, 1.5ms=90度, 2.5ms=180度 */
+#define SERVO_MIN_US           500U
+#define SERVO_MAX_US           2500U
+#define SERVO_NEUTRAL_US       1500U
+#define SERVO_HOME_ANGLE       0U
+#define SERVO_ACTIVE_ANGLE     60U
+#define SERVO_BOOT_SETTLE_MS   600U
+#define SERVO_SIGNAL_TIMEOUT_MS 200U
 /* USER CODE END PD */
 
 void SystemClock_Config(void);
 
 /* USER CODE BEGIN PV */
-typedef enum
-{
-  SERVO_STATE_HOME = 0,
-  SERVO_STATE_ACTIVE
-} ServoState_t;
+typedef enum { SERVO_HOME = 0, SERVO_ACTIVE = 1 } ServoRun_t;
 
 volatile uint8_t uart_rx_byte = 0;
 volatile uint8_t uart_rx_flag = 0;
 
-static ServoState_t servo_state = SERVO_STATE_HOME;
-static uint32_t servo_state_tick = 0;
+static ServoRun_t servo_run = SERVO_HOME;
+static uint8_t servo_signal_live = 0;
+static uint32_t servo_last_r_tick = 0;
 static uint16_t servo_pulse_us = 0;
 /* USER CODE END PV */
 
 /* USER CODE BEGIN 0 */
-static uint16_t Servo_AngleToUs(uint8_t angle)
+static uint16_t Servo_UsFromAngle(uint8_t angle)
 {
   if (angle > 180U) angle = 180U;
   return (uint16_t)(SERVO_MIN_US +
                     ((uint32_t)angle * (SERVO_MAX_US - SERVO_MIN_US)) / 180U);
 }
 
-static void Servo_OutputUs(uint16_t us)
+static void Servo_SetUs(uint16_t us)
 {
   if (us < SERVO_MIN_US) us = SERVO_MIN_US;
   if (us > SERVO_MAX_US) us = SERVO_MAX_US;
@@ -53,50 +52,53 @@ static void Servo_OutputUs(uint16_t us)
   __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_4, us);
 }
 
-static void Servo_GoAngle(uint8_t angle)
+static void Servo_SetAngle(uint8_t angle)
 {
-  Servo_OutputUs(Servo_AngleToUs(angle));
+  Servo_SetUs(Servo_UsFromAngle(angle));
 }
 
-static void Servo_ResetHome(void)
+static void Servo_Init(void)
 {
-  Servo_GoAngle(SERVO_HOME_ANGLE);
-  servo_state = SERVO_STATE_HOME;
-  servo_state_tick = HAL_GetTick();
+  /* 先 90 度中位再开 PWM，避免一上电就用 0 度顶死限位乱转 */
+  Servo_SetUs(SERVO_NEUTRAL_US);
+  HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_4);
+  HAL_Delay(SERVO_BOOT_SETTLE_MS);
+
+  Servo_SetAngle(SERVO_HOME_ANGLE);
+  HAL_Delay(SERVO_BOOT_SETTLE_MS);
+  servo_run = SERVO_HOME;
+  servo_signal_live = 0;
+  servo_last_r_tick = 0;
+}
+
+static void Servo_GoHome(void)
+{
+  if (servo_run == SERVO_HOME) return;
+  Servo_SetAngle(SERVO_HOME_ANGLE);
+  servo_run = SERVO_HOME;
 }
 
 static void Servo_GoActive(void)
 {
-  Servo_GoAngle(SERVO_ACTIVE_ANGLE);
-  servo_state = SERVO_STATE_ACTIVE;
-  servo_state_tick = HAL_GetTick();
+  if (servo_run == SERVO_ACTIVE) return;
+  Servo_SetAngle(SERVO_ACTIVE_ANGLE);
+  servo_run = SERVO_ACTIVE;
 }
 
-static void Servo_PowerOnReset(void)
+static void Servo_OnR(void)
 {
-  Servo_GoAngle(SERVO_HOME_ANGLE);
-  HAL_TIM_Base_Start(&htim2);
-  HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_4);
-  HAL_Delay(SERVO_BOOT_SETTLE_MS);
-  servo_state = SERVO_STATE_HOME;
-  servo_pulse_us = Servo_AngleToUs(SERVO_HOME_ANGLE);
-}
-
-static void Servo_OnByte(uint8_t b)
-{
-  if (b != 'R') return;
-  if (servo_state == SERVO_STATE_HOME)
-  {
-    Servo_GoActive();
-  }
+  servo_signal_live = 1;
+  servo_last_r_tick = HAL_GetTick();
+  Servo_GoActive();
 }
 
 static void Servo_Task(void)
 {
-  if (servo_state != SERVO_STATE_ACTIVE) return;
-  if ((HAL_GetTick() - servo_state_tick) >= SERVO_ACTIVE_HOLD_MS)
+  if (!servo_signal_live) return;
+  if ((HAL_GetTick() - servo_last_r_tick) >= SERVO_SIGNAL_TIMEOUT_MS)
   {
-    Servo_ResetHome();
+    servo_signal_live = 0;
+    Servo_GoHome();
   }
 }
 /* USER CODE END 0 */
@@ -109,7 +111,7 @@ int main(void)
   MX_USART1_UART_Init();
   MX_TIM2_Init();
 
-  Servo_PowerOnReset();
+  Servo_Init();
   HAL_UART_Receive_IT(&huart1, &uart_rx_byte, 1);
 
   while (1)
@@ -117,7 +119,7 @@ int main(void)
     if (uart_rx_flag)
     {
       uart_rx_flag = 0;
-      Servo_OnByte(uart_rx_byte);
+      if (uart_rx_byte == 'R') Servo_OnR();
     }
     Servo_Task();
   }
